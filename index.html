@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>モアレ干渉縞アート描画</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #111; }
+    canvas { display: block; }
+    input[type=range] { accent-color: #818cf8; }
+  </style>
+</head>
+<body class="min-h-screen text-white flex flex-col items-center py-4 gap-4">
+  <h1 class="text-2xl font-bold text-indigo-300">モアレ干渉縞アート描画</h1>
+
+  <div class="flex flex-wrap gap-3 items-center justify-center bg-gray-900 rounded-xl p-3 w-full max-w-3xl">
+    <label class="flex flex-col items-center text-xs text-gray-300 gap-1">
+      縞の間隔1
+      <input type="range" id="sliderP1" min="5" max="50" value="12" step="1" class="w-24" />
+      <span id="valP1" class="text-indigo-300">12px</span>
+    </label>
+    <label class="flex flex-col items-center text-xs text-gray-300 gap-1">
+      縞の間隔2
+      <input type="range" id="sliderP2" min="5" max="50" value="13" step="1" class="w-24" />
+      <span id="valP2" class="text-indigo-300">13px</span>
+    </label>
+    <label class="flex flex-col items-center text-xs text-gray-300 gap-1">
+      角度1 (°)
+      <input type="range" id="sliderA1" min="0" max="180" value="0" step="1" class="w-24" />
+      <span id="valA1" class="text-indigo-300">0°</span>
+    </label>
+    <label class="flex flex-col items-center text-xs text-gray-300 gap-1">
+      角度2 (°)
+      <input type="range" id="sliderA2" min="0" max="180" value="5" step="1" class="w-24" />
+      <span id="valA2" class="text-indigo-300">5°</span>
+    </label>
+    <label class="flex flex-col items-center text-xs text-gray-300 gap-1">
+      変位
+      <input type="range" id="sliderPhase" min="0" max="100" value="0" step="1" class="w-24" />
+      <span id="valPhase" class="text-indigo-300">0</span>
+    </label>
+    <label class="flex flex-col items-center text-xs text-gray-300 gap-1">
+      パターン種別
+      <select id="selectPattern" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm">
+        <option value="sine">正弦波</option>
+        <option value="square">矩形波</option>
+        <option value="circle">同心円</option>
+      </select>
+    </label>
+    <label class="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+      <input type="checkbox" id="chkAnimate" class="w-4 h-4 accent-indigo-500" />
+      アニメーション
+    </label>
+    <button id="btnSave" class="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-sm">PNG保存</button>
+  </div>
+
+  <canvas id="canvas" class="rounded-xl border border-gray-700"></canvas>
+
+  <script>
+  (() => {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const W = Math.min(window.innerWidth - 32, 660);
+    const H = W;
+    canvas.width = W;
+    canvas.height = H;
+
+    let p1 = 12, p2 = 13;
+    let a1 = 0, a2 = 5;
+    let phase = 0;
+    let patternType = 'sine';
+    let animating = false;
+    let animId;
+    let autoPhase = 0;
+
+    // ImageData-based rendering for performance
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    function patternValue(px, py, period, angleDeg, phaseOffset, type) {
+      const ar = angleDeg * Math.PI / 180;
+      const cos = Math.cos(ar), sin = Math.sin(ar);
+      if (type === 'circle') {
+        const cx = W / 2, cy = H / 2;
+        const r = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+        const v = (r + phaseOffset) / period;
+        return 0.5 + 0.5 * Math.sin(v * 2 * Math.PI);
+      }
+      const proj = px * cos + py * sin;
+      const v = (proj + phaseOffset) / period;
+      if (type === 'square') return ((v % 1 + 1) % 1) < 0.5 ? 1 : 0;
+      return 0.5 + 0.5 * Math.sin(v * 2 * Math.PI);
+    }
+
+    function render() {
+      const ph = phase + autoPhase;
+      for (let py = 0; py < H; py++) {
+        for (let px = 0; px < W; px++) {
+          const v1 = patternValue(px, py, p1, a1, 0, patternType);
+          const v2 = patternValue(px, py, p2, a2, ph, patternType);
+          // difference blend
+          const diff = Math.abs(v1 - v2);
+          // color: map diff to a gradient (white/black or slight color)
+          const brightness = diff;
+          const r = Math.floor(brightness * 255);
+          const g = Math.floor(brightness * 240);
+          const b = Math.floor(brightness * 200);
+          const idx = (py * W + px) * 4;
+          data[idx] = r;
+          data[idx + 1] = g;
+          data[idx + 2] = b;
+          data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    function animLoop() {
+      if (!animating) return;
+      autoPhase = (autoPhase + 0.3) % (p2 * 100);
+      render();
+      animId = requestAnimationFrame(animLoop);
+    }
+
+    function redraw() {
+      cancelAnimationFrame(animId);
+      render();
+      if (animating) animLoop();
+    }
+
+    function bindSlider(id, valId, setter, fmt) {
+      const el = document.getElementById(id);
+      const span = document.getElementById(valId);
+      el.addEventListener('input', () => {
+        setter(parseFloat(el.value));
+        span.textContent = fmt ? fmt(parseFloat(el.value)) : el.value;
+        redraw();
+      });
+    }
+
+    bindSlider('sliderP1', 'valP1', v => { p1 = v; }, v => v + 'px');
+    bindSlider('sliderP2', 'valP2', v => { p2 = v; }, v => v + 'px');
+    bindSlider('sliderA1', 'valA1', v => { a1 = v; }, v => v + '°');
+    bindSlider('sliderA2', 'valA2', v => { a2 = v; }, v => v + '°');
+    bindSlider('sliderPhase', 'valPhase', v => { phase = v; });
+    document.getElementById('selectPattern').addEventListener('change', e => {
+      patternType = e.target.value;
+      redraw();
+    });
+    document.getElementById('chkAnimate').addEventListener('change', e => {
+      animating = e.target.checked;
+      if (animating) { autoPhase = 0; animLoop(); }
+      else { cancelAnimationFrame(animId); }
+    });
+    document.getElementById('btnSave').addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = 'モアレ干渉縞.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+
+    render();
+  })();
+  </script>
+</body>
+</html>
